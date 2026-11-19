@@ -70,6 +70,50 @@ make -C vivado_zedboard/qspi run
 更新 C 应用时重复 `flash` 和 `run`，无需重新综合。Flash 在断电后保留固件。
 这套流程在重新上电后仍由电脑运行 `make run`，完成 FPGA 配置和固件加载。
 
+## 已通过实板验证的应用
+
+以下应用均已在同一份 ZedBoard RV32I 硬件设计上完成 RTL 仿真和实板运行。
+实板日志通过 XSDB 读取共享 BRAM，应用正常结束时退出状态为 `0`。
+周期数和指令数对应本工程的工具链及编译选项。
+
+| 应用 | 来源及功能 | 实板结果 |
+| --- | --- | --- |
+| `hello_demo.c` | 调用上游 `firmware/hello.c` | `hello world` |
+| `demo.c` | 本工程的整字和单字节 BRAM 自检 | `BRAM PASS (0x00005A2A)` |
+| `sieve_demo.c` | 复用上游 `firmware/sieve.c` 和 `firmware/stats.c` | 31 个质数，末项 127，`checksum: 1772A48F OK`；累计 97380 周期、19130 条指令、CPI 5.09 |
+| `benchmark_demo.c` | 改编自 `picosoc/firmware.c` 的 `cmd_benchmark()`，固定种子执行 20 轮数组运算 | `Chksum: 0x5B8EB866`；591416 周期、112684 条指令、CPI 5.24；`BENCHMARK PASS` |
+| `memtest_demo.c` | 改编自同文件的 `cmd_memtest()`，使用独立 4 KiB 数组 | 5 轮跨步整字读写和前 128 字节读写通过；`MEMTEST PASS` |
+| `dhrystone_demo.c` | 改编自 `dhrystone/dhry_1.c`、`dhry_2.c`，执行 100 轮并核对最终变量 | 510850 周期、94810 条指令；`Arr_2_Glob[8][7] = 110`；`DHRYSTONE PASS` |
+
+`sieve_demo.c` 的计数是 CPU 启动后的累计值，包含启动和 sieve 日志写入。
+Benchmark 和 Dhrystone 使用测试前后的计数差，结果打印位于采样结束之后。
+Memtest 检查数组偏移 0、1024、2048、3072 的整字读写，以及前 128 字节的读写。
+Dhrystone 使用静态记录、精简输出和当前 RV32I 编译设置，用于功能验证。
+
+例如，在仓库根目录构建 Dhrystone：
+
+```bash
+make -C vivado_zedboard/qspi app APP=dhrystone_demo.c \
+  OUT="$PWD/vivado_zedboard/build/qspi/dhrystone"
+```
+
+保持 `hw_server` 运行后，烧录并执行：
+
+```bash
+make -C vivado_zedboard/qspi flash APP=dhrystone_demo.c \
+  OUT="$PWD/vivado_zedboard/build/qspi/dhrystone" \
+  FSBL="$PWD/vivado_zedboard/build/qspi/zynq_fsbl.elf" &&
+make -C vivado_zedboard/qspi run
+```
+
+`flash` 会重新构建指定应用并替换 Flash 偏移 `0x00f00000` 的应用镜像。
+`run` 读取板上当前镜像，构建时为应用指定的 `OUT` 用于保存电脑端产物。
+最后一次已验证的实板运行是 Dhrystone，固件大小为 2900 字节。
+通过修改 `APP` 和 `OUT` 可以切换上表中的其他应用。
+
+当前 `make sim` 的 testbench 专门检查 `demo.c` 的 BRAM 自检输出。
+新增应用使用临时专用 testbench 完成了仿真，这些临时文件未纳入源码。
+
 ## 生成 FSBL
 
 在 Ubuntu 24.04 上，安装 `gcc-arm-none-eabi` 和 `libnewlib-arm-none-eabi`。
